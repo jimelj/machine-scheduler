@@ -1,0 +1,42 @@
+<!-- templates/index.html -->
+{% extends "base.html" %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-8">
+        <div class="card">
+            <div class="card-header">
+                <h5>Upload PDF File</h5>
+            </div>
+            <div class="card-body">
+                <form method="post" enctype="multipart/form-data">
+                    <div class="mb-3">
+                        <label for="num_machines" class="form-label">Number of Machines</label>
+                        <input type="number" class="form-control" id="num_machines" name="num_machines" value="3" min="1" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Scheduling Method</label>
+                        <div class="form-check">
+                            <input class="form-check-input" type="radio" name="scheduling_method" id="by_store" value="by_store" checked>
+                            <label class="form-check-label" for="by_store">
+                                By Store (prioritize keeping stores on same machine)
+                            </label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="radio" name="scheduling_method" id="by_zipcode" value="by_zipcode">
+                            <label class="form-check-label" for="by_zipcode">
+                                By Zipcode (prioritize keeping zipcodes on single machine)
+                            </label>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label for="pdf_file" class="form-label">Select PDF File</label>
+                        <input type="file" class="form-control" id="pdf_file" name="pdf_file" required accept=".pdf">
+                    </div>
+                    <button type="submit" class="btn btn-primary">Process PDF</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

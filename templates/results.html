@@ -1,0 +1,133 @@
+<!-- templates/results.html -->
+{% extends "base.html" %}
+
+{% block title %}Machine Schedule Results{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h3>Machine Schedule Report</h3>
+            </div>
+            <div class="card-body">
+                <h4>Machine Load Distribution</h4>
+                <div class="row mb-4">
+                    <div class="col-md-6">
+                        <table class="table table-striped">
+                            <thead>
+                                <tr>
+                                    <th>Machine</th>
+                                    <th>Assignments</th>
+                                    <th>Percentage</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for i in range(machine_loads|length) %}
+                                <tr>
+                                    <td>Machine {{ i+1 }}</td>
+                                    <td>{{ machine_loads[i] }}</td>
+                                    <td>{{ (machine_loads[i] / total_load * 100) | round(1) }}%</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="progress" style="height: 30px;">
+                            {% for i in range(machine_loads|length) %}
+                            <div class="progress-bar bg-{{ ['primary', 'success', 'info', 'warning', 'danger'][i % 5] }}" 
+                                 role="progressbar" 
+                                 style="width: {{ machine_loads[i] / total_load * 100 }}%" 
+                                 aria-valuenow="{{ machine_loads[i] }}" 
+                                 aria-valuemin="0" 
+                                 aria-valuemax="{{ total_load }}">
+                                Machine {{ i+1 }}
+                            </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                </div>
+
+                <h4>Detailed Machine Assignments</h4>
+                <div class="accordion" id="machineAccordion">
+                    {% for machine, assignments in machine_schedule.items() %}
+                    <div class="accordion-item">
+                        <h2 class="accordion-header" id="heading{{ machine }}">
+                            <button class="accordion-button" type="button" data-bs-toggle="collapse" 
+                                    data-bs-target="#collapse{{ machine }}" aria-expanded="true" 
+                                    aria-controls="collapse{{ machine }}">
+                                Machine {{ machine }} ({{ assignments|length }} assignments)
+                            </button>
+                        </h2>
+                        <div id="collapse{{ machine }}" class="accordion-collapse collapse" 
+                             aria-labelledby="heading{{ machine }}" data-bs-parent="#machineAccordion">
+                            <div class="accordion-body">
+                                <table class="table table-striped">
+                                    <thead>
+                                        <tr>
+                                            <th>#</th>
+                                            <th>Store</th>
+                                            <th>Zip Codes</th>
+                                            <th>Total Quantity</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for idx, assignment in enumerate(assignments, 1) %}
+                                        <tr>
+                                            <td>{{ idx }}</td>
+                                            <td>{{ assignment.store }}</td>
+                                            <td>
+                                                {{ assignment.zip_codes|join(', ') }}
+                                                <span class="badge bg-secondary">{{ assignment.zip_code_count }}</span>
+                                            </td>
+                                            <td>{{ assignment.total_quantity }}</td>
+                                        </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+
+                <h4 class="mt-4">Zipcode Machine Assignments</h4>
+                <table class="table table-striped">
+                    <thead>
+                        <tr>
+                            <th>Zipcode</th>
+                            <th>Mail Date</th>
+                            <th>Machines</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for zipcode, data in zipcode_schedule.items()|sort %}
+                        <tr>
+                            <td>{{ zipcode }}</td>
+                            <td>
+                                {% if data.mail_date %}
+                                    {{ data.mail_date }}
+                                {% else %}
+                                    <!-- No mail date found -->
+                                {% endif %}
+                            </td>
+                            <td>{{ data.machines|join(', ') }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+
+                <div class="mt-4">
+                    <a href="{{ url_for('download_file', filename=excel_filename) }}" class="btn btn-success">
+                        Download Excel Report
+                    </a>
+                    <a href="{{ url_for('index') }}" class="btn btn-primary">
+                        Process Another File
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
