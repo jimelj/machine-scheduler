@@ -13,8 +13,8 @@ app.secret_key = "machine_scheduling_app_secret_key"
 app.config['UPLOAD_FOLDER'] = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads')
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max upload size
 
-# Add enumerate function to Jinja2 environment
-app.jinja_env.globals.update(enumerate=enumerate)
+# Add enumerate and sum functions to Jinja2 environment
+app.jinja_env.globals.update(enumerate=enumerate, sum=sum)
 
 # Create uploads directory if it doesn't exist
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
@@ -452,88 +452,235 @@ def process_pdf_file(pdf_path, num_machines, scheduling_method='by_store'):
     # Get mail dates from the Zips by address file
     mail_dates = get_zip_mail_dates()
     
+    # Group zipcodes by mail date
+    zipcode_by_date = defaultdict(list)
+    for zipcode in parsed_data.keys():
+        mail_date = mail_dates.get(zipcode, "")
+        zipcode_by_date[mail_date].append(zipcode)
+    
+    # Print mail date groupings for debugging
+    print("Zipcodes by mail date:")
+    for date, zipcodes in zipcode_by_date.items():
+        print(f"{date}: {zipcodes}")
+    
     # Analyze common copies
     common_copies = analyze_common_copies(parsed_data)
     
     # Create machine schedule based on selected method
     if scheduling_method == 'by_zipcode':
-        # Use zip code prioritized scheduling
-        machine_assignments, machine_loads, zipcode_machine = create_machine_schedule_by_zipcode(parsed_data, num_machines)
-        
-        # Generate simplified schedule where each zip code is on one machine
+        # Use zip code prioritized scheduling for each day separately
         machine_schedule = {}
         for machine_num in range(1, num_machines + 1):
             machine_schedule[machine_num] = []
         
-        # Add stores to their assigned machines
-        for store, machine in machine_assignments.items():
-            # Find zip codes and quantities for this store
-            zip_appearances = []
-            total_quantity = 0
-            for zipcode, info in parsed_data.items():
-                for store_info in info['stores']:
-                    if store_info['store_name'] == store:
-                        zip_appearances.append({
-                            'zipcode': zipcode,
-                            'quantity': store_info['quantity']
-                        })
-                        total_quantity += store_info['quantity']
+        # Create zipcode schedule
+        zipcode_schedule = {}
+        
+        # Initialize machine_loads for by_zipcode method (will track total quantities)
+        machine_loads = [0] * num_machines
+        
+        # Group data by mail date
+        data_by_date = defaultdict(dict)
+        for zipcode, info in parsed_data.items():
+            mail_date = mail_dates.get(zipcode, "")
+            data_by_date[mail_date][zipcode] = info
+        
+        # Get ordered mail dates (MON first, then TUES, etc.)
+        ordered_days = ["MON", "TUES", "WED", "THURS", "FRI", "SAT", "SUN", ""]
+        sorted_mail_dates = sorted(data_by_date.keys(), key=lambda x: ordered_days.index(x) if x in ordered_days else len(ordered_days))
+        
+        # Process each mail date separately
+        for mail_date in sorted_mail_dates:
+            date_data = data_by_date[mail_date]
             
-            # Add to machine schedule
-            machine_schedule[machine].append({
-                'store': store,
-                'zip_codes': [app['zipcode'] for app in zip_appearances],
-                'zip_code_count': len(zip_appearances),
-                'total_quantity': total_quantity
-            })
-        
-        # Create zipcode schedule with single machine per zipcode and add mail dates
-        zipcode_schedule = {}
-        for zipcode, machine in zipcode_machine.items():
-            mail_date = mail_dates.get(zipcode, "")
-            zipcode_schedule[zipcode] = {
-                'machines': [machine],
-                'mail_date': mail_date
-            }
+            if not date_data:
+                continue
+                
+            # Schedule for this day only
+            day_assignments, day_loads, day_zipcode_machine = create_machine_schedule_by_zipcode(date_data, num_machines)
+            
+            # Update zipcode schedule
+            for zipcode, machine in day_zipcode_machine.items():
+                zipcode_schedule[zipcode] = {
+                    'machines': [machine],
+                    'mail_date': mail_date
+                }
+            
+            # Add stores to machine assignments for this day
+            for store, machine in day_assignments.items():
+                # Find zip codes and quantities for this store
+                zip_appearances = []
+                total_quantity = 0
+                
+                for zipcode, info in date_data.items():
+                    for store_info in info['stores']:
+                        if store_info['store_name'] == store:
+                            zip_appearances.append({
+                                'zipcode': zipcode,
+                                'quantity': store_info['quantity'],
+                                'mail_date': mail_date
+                            })
+                            total_quantity += store_info['quantity']
+                
+                # Add to machine schedule
+                machine_schedule[machine].append({
+                    'store': store,
+                    'zip_codes': [app['zipcode'] for app in zip_appearances],
+                    'mail_date': mail_date,
+                    'zip_code_count': len(zip_appearances),
+                    'total_quantity': total_quantity
+                })
+                
+                # Update total quantity for this machine
+                machine_loads[machine-1] += total_quantity
     else:
-        # Use original store-based scheduling
-        machine_assignments, machine_loads = create_machine_schedule(common_copies, num_machines)
-        machine_schedule, zip_machine_map = generate_detailed_schedule(parsed_data, machine_assignments)
+        # Use store-based scheduling but process days in order
+        # First, create separate store appearances by mail date
+        store_appearances_by_date = defaultdict(lambda: defaultdict(list))
         
-        # Add mail dates to the zipcode schedule
+        for zipcode, info in parsed_data.items():
+            mail_date = mail_dates.get(zipcode, "")
+            
+            for store in info['stores']:
+                store_name = store['store_name']
+                store_appearances_by_date[mail_date][store_name].append({
+                    'zipcode': zipcode,
+                    'quantity': store['quantity']
+                })
+        
+        # Get ordered mail dates (MON first, then TUES, etc.)
+        ordered_days = ["MON", "TUES", "WED", "THURS", "FRI", "SAT", "SUN", ""]
+        sorted_mail_dates = sorted(store_appearances_by_date.keys(), key=lambda x: ordered_days.index(x) if x in ordered_days else len(ordered_days))
+        
+        # Create machine assignments
+        machine_assignments, machine_loads = create_machine_schedule(common_copies, num_machines)
+        
+        # Organize assignments by day first, then by machine
+        machine_schedule = {}
+        zipcode_machine_mapping = defaultdict(set)
+        
+        # Initialize machine loads with total quantities
+        machine_total_quantities = [0] * num_machines
+        
+        for machine_num in range(1, num_machines + 1):
+            machine_schedule[machine_num] = []
+        
+        # First pass: assign stores to machines based on common copies
+        for mail_date in sorted_mail_dates:
+            for store, machine in machine_assignments.items():
+                # Skip if this store doesn't have appearances for this day
+                if store not in store_appearances_by_date[mail_date]:
+                    continue
+                    
+                store_appearances = store_appearances_by_date[mail_date][store]
+                zip_codes = [app['zipcode'] for app in store_appearances]
+                total_quantity = sum(app['quantity'] for app in store_appearances)
+                
+                if zip_codes:
+                    # Update zipcode machine mapping
+                    for zipcode in zip_codes:
+                        zipcode_machine_mapping[zipcode].add(machine)
+                    
+                    # Add to machine schedule
+                    machine_schedule[machine].append({
+                        'store': store,
+                        'zip_codes': zip_codes,
+                        'mail_date': mail_date,
+                        'zip_code_count': len(zip_codes),
+                        'total_quantity': total_quantity
+                    })
+                    
+                    # Update total quantity for this machine
+                    machine_total_quantities[machine-1] += total_quantity
+        
+        # Create zipcode schedule with mail dates
         zipcode_schedule = {}
-        for zipcode, machines in zip_machine_map.items():
+        for zipcode, machines in zipcode_machine_mapping.items():
             mail_date = mail_dates.get(zipcode, "")
             zipcode_schedule[zipcode] = {
-                'machines': machines,
+                'machines': list(machines),
                 'mail_date': mail_date
             }
+        
+        # Use the total quantities instead of zip counts for machine_loads
+        machine_loads = machine_total_quantities
+    
+    # Calculate machine loads per day (zip code counts)
+    machine_loads_by_date = defaultdict(lambda: [0] * num_machines)
+    for machine, assignments in machine_schedule.items():
+        for assignment in assignments:
+            mail_date = assignment.get('mail_date', '')
+            machine_loads_by_date[mail_date][machine-1] += assignment['zip_code_count']
+    
+    # Convert to regular dict for JSON serialization
+    machine_loads_by_date = {date: loads for date, loads in machine_loads_by_date.items()}
+    
+    # Calculate total load (total quantities)
+    total_load = sum(machine_loads)
     
     return {
         'machine_schedule': machine_schedule,
         'zipcode_schedule': zipcode_schedule,
         'machine_loads': machine_loads,
-        'total_load': sum(machine_loads),
-        'zip_code_count': len(parsed_data)
+        'machine_loads_by_date': machine_loads_by_date,
+        'total_load': total_load,
+        'zip_code_count': len(parsed_data),
+        'mail_dates': sorted_mail_dates
     }
 
-def create_excel_report(machine_schedule, pdf_path, zipcode_schedule=None):
+def create_excel_report(machine_schedule, pdf_path, zipcode_schedule=None, machine_loads_by_date=None, mail_dates=None):
     """Create Excel report from schedule data"""
     # Create Excel writer with multiple sheets
-    output_dir = os.path.dirname(pdf_path)
+    output_dir = os.path.dirname(os.path.abspath(__file__))  # Save to the app root directory
     excel_path = os.path.join(output_dir, "machine_schedule.xlsx")
     writer = pd.ExcelWriter(excel_path, engine='xlsxwriter')
     
-    # First sheet - machine schedules
-    schedule_df = pd.DataFrame(columns=['Store', 'Machine', 'Zip Codes', 'Total Quantity'])
+    # Get all mail dates
+    if not mail_dates:
+        # Extract mail dates from assignments if not provided
+        all_mail_dates = set()
+        for machine, assignments in machine_schedule.items():
+            for assignment in assignments:
+                mail_date = assignment.get('mail_date', '')
+                if mail_date:
+                    all_mail_dates.add(mail_date)
+        mail_dates = sorted(list(all_mail_dates))
+    
+    # First sheet - machine schedules organized by mail date
+    schedule_df = pd.DataFrame(columns=['Mail Date', 'Machine', 'Store', 'Zip Codes', 'Quantity'])
     
     row_idx = 0
+    for mail_date in mail_dates:
+        if not mail_date:  # Skip empty mail dates
+            continue
+            
+        for machine, assignments in machine_schedule.items():
+            # Filter assignments for this mail date
+            date_assignments = [a for a in assignments if a.get('mail_date', '') == mail_date]
+            
+            for assignment in date_assignments:
+                zip_count = assignment['zip_code_count']
+                schedule_df.loc[row_idx] = [
+                    mail_date,
+                    f"Machine {machine}",
+                    assignment['store'],
+                    f"{', '.join(assignment['zip_codes'])} {zip_count}",
+                    assignment['total_quantity']
+                ]
+                row_idx += 1
+    
+    # Add any assignments without mail dates at the end
     for machine, assignments in machine_schedule.items():
-        for assignment in assignments:
+        # Filter assignments with no mail date
+        no_date_assignments = [a for a in assignments if not a.get('mail_date', '')]
+        
+        for assignment in no_date_assignments:
+            zip_count = assignment['zip_code_count']
             schedule_df.loc[row_idx] = [
-                assignment['store'],
+                "UNASSIGNED",
                 f"Machine {machine}",
-                ", ".join(assignment['zip_codes']),
+                assignment['store'],
+                f"{', '.join(assignment['zip_codes'])} {zip_count}",
                 assignment['total_quantity']
             ]
             row_idx += 1
@@ -541,25 +688,75 @@ def create_excel_report(machine_schedule, pdf_path, zipcode_schedule=None):
     # Write the machine schedule sheet
     schedule_df.to_excel(writer, sheet_name='Machine Schedule', index=False)
     
-    # Second sheet - zipcode to machine mapping with mail dates
+    # Second sheet - separate sheets for each mail date
+    for mail_date in mail_dates:
+        if not mail_date:  # Skip empty mail dates
+            continue
+            
+        date_df = pd.DataFrame(columns=['Machine', 'Store', 'Zip Codes', 'Quantity'])
+        row_idx = 0
+        
+        for machine, assignments in machine_schedule.items():
+            # Filter assignments for this mail date
+            date_assignments = [a for a in assignments if a.get('mail_date', '') == mail_date]
+            
+            for assignment in date_assignments:
+                zip_count = assignment['zip_code_count']
+                date_df.loc[row_idx] = [
+                    f"Machine {machine}",
+                    assignment['store'],
+                    f"{', '.join(assignment['zip_codes'])} {zip_count}",
+                    assignment['total_quantity']
+                ]
+                row_idx += 1
+        
+        if not date_df.empty:
+            date_df.to_excel(writer, sheet_name=f'{mail_date} Schedule', index=False)
+    
+    # Third sheet - zipcode to machine mapping with mail dates
     if zipcode_schedule:
         print("Creating zipcode schedule sheet with mail dates")
-        zipcode_df = pd.DataFrame(columns=['Zipcode', 'Mail Date', 'Machines'])
+        zipcode_df = pd.DataFrame(columns=['Mail Date', 'Zipcode', 'Machines'])
         
-        for zipcode, data in sorted(zipcode_schedule.items()):
-            mail_date = data.get('mail_date', '')
-            machines = ", ".join(map(str, data.get('machines', [])))
-            print(f"Zipcode: {zipcode}, Mail Date: '{mail_date}', Machines: {machines}")
-            
-            zipcode_df.loc[len(zipcode_df)] = [zipcode, mail_date, machines]
+        # Group zipcodes by mail date
+        by_date = defaultdict(list)
+        for zipcode, data in zipcode_schedule.items():
+            mail_date = data.get('mail_date', 'UNASSIGNED')
+            if not mail_date:
+                mail_date = 'UNASSIGNED'
+            by_date[mail_date].append((zipcode, data))
+        
+        # Add to dataframe in order of mail date
+        row_idx = 0
+        for mail_date in mail_dates + ['UNASSIGNED']:
+            for zipcode, data in sorted(by_date.get(mail_date, [])):
+                machines = ", ".join(map(str, data.get('machines', [])))
+                zipcode_df.loc[row_idx] = [
+                    mail_date,
+                    zipcode,
+                    machines
+                ]
+                row_idx += 1
         
         # Debug: Print the entire dataframe before writing to Excel
         print(f"Zipcode DataFrame:\n{zipcode_df.head(10).to_string()}")
         
         # Write the zipcode sheet
         zipcode_df.to_excel(writer, sheet_name='Zipcode Schedule', index=False)
-    else:
-        print("No zipcode schedule provided - skipping sheet")
+    
+    # Fourth sheet - Machine loads by day
+    if machine_loads_by_date:
+        loads_df = pd.DataFrame(columns=['Mail Date'] + [f'Machine {i+1}' for i in range(len(next(iter(machine_loads_by_date.values()))))])
+        
+        row_idx = 0
+        for mail_date in mail_dates:
+            if mail_date in machine_loads_by_date:
+                loads = machine_loads_by_date[mail_date]
+                loads_df.loc[row_idx] = [mail_date] + loads
+                row_idx += 1
+        
+        if not loads_df.empty:
+            loads_df.to_excel(writer, sheet_name='Daily Machine Loads', index=False)
     
     # Save the Excel file
     writer.close()
@@ -570,65 +767,89 @@ def create_excel_report(machine_schedule, pdf_path, zipcode_schedule=None):
 @app.route('/', methods=['GET', 'POST'])
 def index():
     if request.method == 'POST':
-        # Check if the post request has the file part
         if 'pdf_file' not in request.files:
             flash('No file part', 'danger')
             return redirect(request.url)
+            
+        pdf_file = request.files['pdf_file']
         
-        file = request.files['pdf_file']
-        
-        # If user does not select file, browser submits an empty file
-        if file.filename == '':
+        if pdf_file.filename == '':
             flash('No selected file', 'danger')
             return redirect(request.url)
-        
-        if file and allowed_file(file.filename):
+            
+        if pdf_file and allowed_file(pdf_file.filename):
             try:
-                # Check machines input
-                num_machines = int(request.form.get('num_machines', 3))
-                if num_machines <= 0:
-                    flash('Number of machines must be greater than 0', 'danger')
-                    return redirect(request.url)
+                # Get the number of machines
+                num_machines = int(request.form.get('machines', 3))
                 
                 # Get scheduling method
                 scheduling_method = request.form.get('scheduling_method', 'by_store')
                 
-                # Save the PDF file
-                filename = secure_filename(file.filename)
-                pdf_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-                file.save(pdf_path)
+                # Save the uploaded PDF file
+                pdf_filename = secure_filename(pdf_file.filename)
+                pdf_path = os.path.join(app.config['UPLOAD_FOLDER'], pdf_filename)
+                pdf_file.save(pdf_path)
                 
-                # Process the file
+                # Process the PDF file
                 result = process_pdf_file(pdf_path, num_machines, scheduling_method)
                 
-                # Create Excel report
+                # Generate Excel report
                 excel_path = create_excel_report(
-                    result['machine_schedule'], 
-                    pdf_path,
-                    result['zipcode_schedule']
+                    machine_schedule=result['machine_schedule'], 
+                    pdf_path=pdf_path, 
+                    zipcode_schedule=result.get('zipcode_schedule'),
+                    machine_loads_by_date=result.get('machine_loads_by_date', {}),
+                    mail_dates=result.get('mail_dates', [])
                 )
                 
-                return render_template('results.html', 
-                                      machine_schedule=result['machine_schedule'],
-                                      zipcode_schedule=result['zipcode_schedule'],
-                                      machine_loads=result['machine_loads'],
-                                      total_load=result['total_load'],
-                                      excel_filename=os.path.basename(excel_path))
+                # Verify that the Excel file was created successfully
+                if not os.path.exists(excel_path):
+                    raise FileNotFoundError(f"Failed to create Excel file at {excel_path}")
+                    
+                excel_filename = os.path.basename(excel_path)
+                
+                # Add default values for variables that might be missing
+                machine_loads = result.get('machine_loads', [0] * num_machines)
+                total_load = result.get('total_load', 0)
+                zip_code_count = result.get('zip_code_count', 0)
+                
+                # Define all required variables for the template
+                template_vars = {
+                    'machine_schedule': result.get('machine_schedule', {}),
+                    'zipcode_schedule': result.get('zipcode_schedule', {}),
+                    'machine_loads': machine_loads,
+                    'total_load': total_load,
+                    'zip_code_count': zip_code_count,
+                    'excel_filename': excel_filename,
+                    'machine_loads_by_date': result.get('machine_loads_by_date', {}),
+                    'mail_dates': result.get('mail_dates', [])
+                }
+                
+                return render_template('results.html', **template_vars)
                 
             except Exception as e:
-                flash(f"Error processing file: {str(e)}", 'danger')
+                flash(f'Error processing file: {str(e)}', 'danger')
+                import traceback
+                traceback.print_exc()
                 return redirect(request.url)
         else:
-            flash('Allowed file type is PDF', 'danger')
+            flash('Allowed file types are PDF only', 'danger')
             return redirect(request.url)
-    
+            
     return render_template('index.html')
 
 @app.route('/download/<filename>')
 def download_file(filename):
     """Download the Excel report"""
-    return send_file(os.path.join(app.config['UPLOAD_FOLDER'], '..', filename), 
-                     as_attachment=True)
+    # Use the application's root directory to find the file
+    app_root = os.path.dirname(os.path.abspath(__file__))
+    file_path = os.path.join(app_root, filename)
+    
+    if os.path.exists(file_path):
+        return send_file(file_path, as_attachment=True)
+    else:
+        flash(f"File not found: {filename}", "danger")
+        return redirect(url_for('index'))
 
 # Create a simple error handler
 @app.errorhandler(Exception)

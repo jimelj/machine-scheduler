@@ -18,7 +18,7 @@
                             <thead>
                                 <tr>
                                     <th>Machine</th>
-                                    <th>Assignments</th>
+                                    <th>Total Quantity</th>
                                     <th>Percentage</th>
                                 </tr>
                             </thead>
@@ -49,72 +49,150 @@
                     </div>
                 </div>
 
-                <h4>Detailed Machine Assignments</h4>
-                <div class="accordion" id="machineAccordion">
-                    {% for machine, assignments in machine_schedule.items() %}
-                    <div class="accordion-item">
-                        <h2 class="accordion-header" id="heading{{ machine }}">
-                            <button class="accordion-button" type="button" data-bs-toggle="collapse" 
-                                    data-bs-target="#collapse{{ machine }}" aria-expanded="true" 
-                                    aria-controls="collapse{{ machine }}">
-                                Machine {{ machine }} ({{ assignments|length }} assignments)
-                            </button>
-                        </h2>
-                        <div id="collapse{{ machine }}" class="accordion-collapse collapse" 
-                             aria-labelledby="heading{{ machine }}" data-bs-parent="#machineAccordion">
-                            <div class="accordion-body">
-                                <table class="table table-striped">
-                                    <thead>
-                                        <tr>
-                                            <th>#</th>
-                                            <th>Store</th>
-                                            <th>Zip Codes</th>
-                                            <th>Total Quantity</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {% for idx, assignment in enumerate(assignments, 1) %}
-                                        <tr>
-                                            <td>{{ idx }}</td>
-                                            <td>{{ assignment.store }}</td>
-                                            <td>
-                                                {{ assignment.zip_codes|join(', ') }}
-                                                <span class="badge bg-secondary">{{ assignment.zip_code_count }}</span>
-                                            </td>
-                                            <td>{{ assignment.total_quantity }}</td>
-                                        </tr>
+                <!-- Daily Machine Workload Section -->
+                <h4>Daily Machine Workload</h4>
+                {% if machine_loads_by_date is defined %}
+                    {% for date, loads in machine_loads_by_date.items()|sort %}
+                        {% if date %}
+                            <h5 class="mt-3">{{ date }}</h5>
+                            <div class="row mb-3">
+                                <div class="col-md-6">
+                                    <table class="table table-striped">
+                                        <thead>
+                                            <tr>
+                                                <th>Machine</th>
+                                                <th>Zip Code Assignments</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {% for i in range(loads|length) %}
+                                            <tr>
+                                                <td>Machine {{ i+1 }}</td>
+                                                <td>{{ loads[i] }}</td>
+                                            </tr>
+                                            {% endfor %}
+                                        </tbody>
+                                    </table>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="progress" style="height: 30px;">
+                                        {% for i in range(loads|length) %}
+                                        <div class="progress-bar bg-{{ ['primary', 'success', 'info', 'warning', 'danger'][i % 5] }}" 
+                                             role="progressbar" 
+                                             style="width: {{ loads[i] / sum(loads) * 100 if sum(loads) > 0 else 0 }}%" 
+                                             aria-valuenow="{{ loads[i] }}" 
+                                             aria-valuemin="0" 
+                                             aria-valuemax="{{ sum(loads) }}">
+                                            Machine {{ i+1 }}
+                                        </div>
                                         {% endfor %}
-                                    </tbody>
-                                </table>
+                                    </div>
+                                </div>
                             </div>
-                        </div>
-                    </div>
+                        {% endif %}
                     {% endfor %}
-                </div>
+                {% endif %}
+
+                <!-- Daily Machine Schedule Section -->
+                <h4 class="mt-4">Daily Machine Schedule</h4>
+                {% if mail_dates is defined %}
+                    {% for date in mail_dates %}
+                        {% if date %}
+                            <div class="card mb-4">
+                                <div class="card-header bg-light">
+                                    <h5 class="mb-0">{{ date }}</h5>
+                                </div>
+                                <div class="card-body">
+                                    <div class="accordion" id="accordionDay{{ loop.index }}">
+                                        {% for machine_num in range(1, machine_loads|length + 1) %}
+                                            <div class="accordion-item">
+                                                <h2 class="accordion-header" id="heading{{ date }}{{ machine_num }}">
+                                                    <button class="accordion-button collapsed" type="button" 
+                                                            data-bs-toggle="collapse" 
+                                                            data-bs-target="#collapse{{ date }}{{ machine_num }}" 
+                                                            aria-expanded="false" 
+                                                            aria-controls="collapse{{ date }}{{ machine_num }}">
+                                                        Machine {{ machine_num }}
+                                                    </button>
+                                                </h2>
+                                                <div id="collapse{{ date }}{{ machine_num }}" 
+                                                     class="accordion-collapse collapse" 
+                                                     aria-labelledby="heading{{ date }}{{ machine_num }}" 
+                                                     data-bs-parent="#accordionDay{{ loop.index }}">
+                                                    <div class="accordion-body">
+                                                        <table class="table table-sm">
+                                                            <thead>
+                                                                <tr>
+                                                                    <th>Store</th>
+                                                                    <th>Zip Codes</th>
+                                                                    <th>Total Quantity</th>
+                                                                </tr>
+                                                            </thead>
+                                                            <tbody>
+                                                                {% for assignment in machine_schedule[machine_num] %}
+                                                                    {% if assignment.mail_date == date %}
+                                                                        <tr>
+                                                                            <td>{{ assignment.store }}</td>
+                                                                            <td>
+                                                                                {{ assignment.zip_codes|join(', ') }} 
+                                                                                <span class="badge bg-secondary">{{ assignment.zip_code_count }}</span>
+                                                                            </td>
+                                                                            <td>{{ assignment.total_quantity }}</td>
+                                                                        </tr>
+                                                                    {% endif %}
+                                                                {% endfor %}
+                                                            </tbody>
+                                                        </table>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        {% endfor %}
+                                    </div>
+                                </div>
+                            </div>
+                        {% endif %}
+                    {% endfor %}
+                {% endif %}
 
                 <h4 class="mt-4">Zipcode Machine Assignments</h4>
                 <table class="table table-striped">
                     <thead>
                         <tr>
-                            <th>Zipcode</th>
                             <th>Mail Date</th>
+                            <th>Zipcode</th>
                             <th>Machines</th>
                         </tr>
                     </thead>
                     <tbody>
-                        {% for zipcode, data in zipcode_schedule.items()|sort %}
-                        <tr>
-                            <td>{{ zipcode }}</td>
-                            <td>
-                                {% if data.mail_date %}
-                                    {{ data.mail_date }}
-                                {% else %}
-                                    <!-- No mail date found -->
+                        {% if mail_dates is defined %}
+                            {% for date in mail_dates %}
+                                {% if date %}
+                                    {% for zipcode, data in zipcode_schedule.items()|sort %}
+                                        {% if data.mail_date == date %}
+                                            <tr>
+                                                <td>{{ date }}</td>
+                                                <td>{{ zipcode }}</td>
+                                                <td>{{ data.machines|join(', ') }}</td>
+                                            </tr>
+                                        {% endif %}
+                                    {% endfor %}
                                 {% endif %}
-                            </td>
-                            <td>{{ data.machines|join(', ') }}</td>
-                        </tr>
-                        {% endfor %}
+                            {% endfor %}
+                        {% else %}
+                            {% for zipcode, data in zipcode_schedule.items()|sort %}
+                                <tr>
+                                    <td>
+                                        {% if data.mail_date %}
+                                            {{ data.mail_date }}
+                                        {% else %}
+                                            <!-- No mail date found -->
+                                        {% endif %}
+                                    </td>
+                                    <td>{{ zipcode }}</td>
+                                    <td>{{ data.machines|join(', ') }}</td>
+                                </tr>
+                            {% endfor %}
+                        {% endif %}
                     </tbody>
                 </table>
 
