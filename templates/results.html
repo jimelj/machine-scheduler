@@ -154,13 +154,85 @@
                     {% endfor %}
                 {% endif %}
 
+                <!-- Suggested Run Sequence Section -->
+                <h4 class="mt-4">Suggested Run Sequence</h4>
+                <p class="text-muted">This sequence minimizes changeovers by grouping similar inserts together.</p>
+                
+                <div class="accordion" id="runSequenceAccordion">
+                    {% for machine_num in range(1, machine_loads|length + 1) %}
+                        <div class="accordion-item">
+                            <h2 class="accordion-header" id="runSequenceHeading{{ machine_num }}">
+                                <button class="accordion-button collapsed" type="button" 
+                                        data-bs-toggle="collapse" 
+                                        data-bs-target="#runSequenceCollapse{{ machine_num }}" 
+                                        aria-expanded="false" 
+                                        aria-controls="runSequenceCollapse{{ machine_num }}">
+                                    <strong>Machine {{ machine_num }} Run Sequence</strong>
+                                </button>
+                            </h2>
+                            <div id="runSequenceCollapse{{ machine_num }}" 
+                                 class="accordion-collapse collapse" 
+                                 aria-labelledby="runSequenceHeading{{ machine_num }}" 
+                                 data-bs-parent="#runSequenceAccordion">
+                                <div class="accordion-body">
+                                    {% if mail_dates %}
+                                        {% for date in mail_dates %}
+                                            {% if date %}
+                                                <h5>{{ date }}</h5>
+                                                <ol class="list-group list-group-numbered mb-3">
+                                                    {% set assignments = [] %}
+                                                    {% for assignment in machine_schedule[machine_num] %}
+                                                        {% if assignment.mail_date == date %}
+                                                            {% set _ = assignments.append(assignment) %}
+                                                        {% endif %}
+                                                    {% endfor %}
+                                                    
+                                                    {% for assignment in assignments %}
+                                                        <li class="list-group-item d-flex justify-content-between align-items-start">
+                                                            <div class="ms-2 me-auto">
+                                                                <div class="fw-bold">{{ assignment.store }}</div>
+                                                                <div>Zip Codes: {{ assignment.zip_codes|join(', ') }} 
+                                                                    <span class="badge bg-secondary">{{ assignment.zip_code_count }}</span>
+                                                                </div>
+                                                                <div class="text-muted">Quantity: {{ assignment.total_quantity }}</div>
+                                                            </div>
+                                                        </li>
+                                                    {% endfor %}
+                                                </ol>
+                                            {% endif %}
+                                        {% endfor %}
+                                    {% else %}
+                                        <ol class="list-group list-group-numbered">
+                                            {% for assignment in machine_schedule[machine_num] %}
+                                                <li class="list-group-item d-flex justify-content-between align-items-start">
+                                                    <div class="ms-2 me-auto">
+                                                        <div class="fw-bold">{{ assignment.store }}</div>
+                                                        <div>Zip Codes: {{ assignment.zip_codes|join(', ') }} 
+                                                            <span class="badge bg-secondary">{{ assignment.zip_code_count }}</span>
+                                                        </div>
+                                                        <div class="text-muted">Quantity: {{ assignment.total_quantity }}</div>
+                                                        {% if assignment.mail_date %}
+                                                            <div class="text-primary">Mail Date: {{ assignment.mail_date }}</div>
+                                                        {% endif %}
+                                                    </div>
+                                                </li>
+                                            {% endfor %}
+                                        </ol>
+                                    {% endif %}
+                                </div>
+                            </div>
+                        </div>
+                    {% endfor %}
+                </div>
+
                 <h4 class="mt-4">Zipcode Machine Assignments</h4>
+                <p class="text-muted">When using "By Zipcode" scheduling, each zipcode is assigned to exactly one machine.</p>
                 <table class="table table-striped">
                     <thead>
                         <tr>
                             <th>Mail Date</th>
                             <th>Zipcode</th>
-                            <th>Machines</th>
+                            <th>Machine</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -172,7 +244,13 @@
                                             <tr>
                                                 <td>{{ date }}</td>
                                                 <td>{{ zipcode }}</td>
-                                                <td>{{ data.machines|join(', ') }}</td>
+                                                <td>
+                                                    {% if data.machines|length == 1 %}
+                                                        Machine {{ data.machines[0] }}
+                                                    {% else %}
+                                                        {{ data.machines|join(', ') }}
+                                                    {% endif %}
+                                                </td>
                                             </tr>
                                         {% endif %}
                                     {% endfor %}
@@ -189,7 +267,13 @@
                                         {% endif %}
                                     </td>
                                     <td>{{ zipcode }}</td>
-                                    <td>{{ data.machines|join(', ') }}</td>
+                                    <td>
+                                        {% if data.machines|length == 1 %}
+                                            Machine {{ data.machines[0] }}
+                                        {% else %}
+                                            {{ data.machines|join(', ') }}
+                                        {% endif %}
+                                    </td>
                                 </tr>
                             {% endfor %}
                         {% endif %}
